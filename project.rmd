@@ -1,0 +1,114 @@
+---
+title: "R Project"
+output: html_document
+date: "2023-11-15"
+---
+
+Weighted Sampling
+
+```{r}
+library(NHANES)
+library(dplyr)
+library(survey)
+design <- svydesign(ids = ~SDMVPSU, strata = ~SDMVSTRA, weights = ~WTINT2YR, data = NHANESraw, nest = TRUE)
+target_sample_size <- 10000
+set.seed(123)
+sample_indices <- sample(seq_len(nrow(NHANESraw)), target_sample_size)
+NHANES <- NHANESraw[sample_indices, ]
+```
+
+```{r}
+data("NHANES")
+NHANES <- unique(NHANES)
+df_raw <- NHANES
+selected_variables <- c('DirectChol', 'Diabetes', 'BMI', 'BPDiaAve', 'BPSysAve', 'PhysActiveDays', 'Gender', 'SmokeNow', 'Race1', 'Poverty') 
+complete_rows <- complete.cases(df_raw[selected_variables])
+df <- df_raw[complete_rows, ]
+df <- df[, selected_variables]
+```
+
+```{r}
+library(officer)
+library(gtsummary)
+table_1 <- tbl_summary(data = df, by = Diabetes, missing = "no",
+            type = list(PhysActiveDays ~ "continuous"),
+            statistic = list(all_continuous() ~ "{mean}({sd})", all_categorical() ~ "{n} ({p}%)" ),
+            ) %>% add_n %>% add_p(test = list(BMI ~ "t.test",
+                                              BPDiaAve ~ "t.test", BPSysAve ~ "t.test", PhysActiveDays ~ "t.test",
+                                              Gender ~ "chisq.test", Race1 ~ "chisq.test", Poverty ~ "t.test",
+                                              SmokeNow ~ "chisq.test"))
+table_1
+```
+
+```{r}
+model_ori <- lm(DirectChol ~ as.factor(Diabetes) + BMI + BPDiaAve + BPSysAve + PhysActiveDays + as.factor(Gender) + as.factor(SmokeNow) + as.factor(Race1) + Poverty, data = df)
+summary(model_ori)
+```
+
+Model Diagnostics
+
+Linear
+
+```{r}
+library(car)
+avPlots(model_ori)
+```
+
+```{r}
+qqnorm(model_ori$residuals, ylab = "Residuals")
+qqline(model_ori$residuals)
+```
+
+Equal Variance
+
+```{r}
+plot(model_ori$fitted.values, model_ori$residuals, xlab = "Fitted Values", ylab = "Residuals")
+```
+
+```{r}
+model_trs <- lm(log(DirectChol) ~ as.factor(Diabetes) + BMI + BPDiaAve + BPSysAve + PhysActiveDays + as.factor(Gender) + as.factor(SmokeNow) + as.factor(Race1) + Poverty, data = df)
+summary(model_trs)
+```
+
+Normal
+
+```{r}
+qqnorm(model_trs$residuals, ylab = "Residuals")
+qqline(model_trs$residuals)
+```
+
+Equal Variance
+
+```{r}
+plot(model_trs$fitted.values, model_trs$residuals, xlab = "Fitted Values", ylab = "Residuals")
+```
+
+model_trs_inter
+
+```{r}
+model_tra_inter <- lm(log(DirectChol) ~ as.factor(Diabetes) + BMI + BPDiaAve + BPSysAve + PhysActiveDays + as.factor(Gender) + as.factor(SmokeNow) + as.factor(Race1) + Poverty + Diabetes:BMI, data = df)
+summary(model_tra_inter)
+sm_trs_int <- summary(model_tra_inter)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+new_data <- with(df, expand.grid(
+  Diabetes = unique(as.factor(Diabetes)),
+  BMI = seq(min(BMI, na.rm = TRUE), max(BMI, na.rm = TRUE), length.out = 100),
+  BPDiaAve = mean(BPDiaAve, na.rm = TRUE), 
+  BPSysAve = mean(BPSysAve, na.rm = TRUE),
+  PhysActiveDays = mean(PhysActiveDays, na.rm = TRUE),
+  Gender = factor(levels(as.factor(df$Gender))[1]),
+  SmokeNow = factor(levels(as.factor(df$SmokeNow))[1]), 
+  Race1 = factor(levels(as.factor(df$Race1))[1]), 
+  Poverty = mean(Poverty, na.rm = TRUE)
+))
+new_data$PredictedLogChol <- predict(model_tra_inter, newdata = new_data)
+ggplot(new_data, aes(x = BMI, y = PredictedLogChol, color = as.factor(Diabetes))) +
+  geom_line() +
+  labs(x = "BMI", y = "Predicted log(DirectChol)", color = "Diabetes Status") +
+  scale_color_manual(values = c("No" = "green", "Yes" = "brown")) + 
+  theme_minimal()
+```
